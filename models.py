@@ -2,10 +2,16 @@
 
 import torch
 import torch.nn as nn
+from torch.quantization import QuantStub, DeQuantStub
 
 class IrisNet(nn.Module):
     def __init__(self, num_classes=3):
         super(IrisNet, self).__init__()
+
+        # Add QuantStub and DeQuantStub
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
+
         self.features = nn.Sequential(
             nn.Conv2d(1, 32, kernel_size=3, padding=1),
             nn.BatchNorm2d(32),
@@ -36,8 +42,14 @@ class IrisNet(nn.Module):
         )
 
     def forward(self, x):
+        # Quantize the input
+        x = self.quant(x)
+
         x = self.features(x)
         x = self.avgpool(x)
         x = torch.flatten(x, 1)
         x = self.classifier(x)
+
+        # Dequantize the output
+        x = self.dequant(x)
         return x
