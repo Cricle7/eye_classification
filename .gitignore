@@ -1,0 +1,6 @@
+iris_dataset
+iris_model.pth
+*iris_model*
+*pycache*
+*.hex
+layer*
