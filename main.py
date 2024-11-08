@@ -37,7 +37,7 @@ def main():
         dataset_root='iris_dataset',
         num_classes=3,
         batch_size=64,
-        num_epochs=50,
+        num_epochs=5,
         learning_rate=0.0005
     )
 

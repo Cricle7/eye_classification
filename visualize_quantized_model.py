@@ -29,17 +29,24 @@ def visualize_weights(model, filename_prefix='quantized_model'):
 
             # 将量化后的权重值转换为实际值
             weight_float = (weight.astype(np.float32) - weight_zero_point) * weight_scale
+            weight_int = module.weight().int_repr()
+            print(f"Weight range for {name}: min={weight_int.min()}, max={weight_int.max()}")
 
             # 绘制权重直方图
+            weight_int = module.weight().int_repr().cpu().numpy().flatten()
             plt.figure()
-            plt.hist(weight_float, bins=100, color='blue', alpha=0.7)
-            plt.title(f'Weight Distribution of {name}')
-            plt.xlabel('Weight Value')
+            plt.hist(weight_int, bins=256, range=(-128, 127), color='skyblue', alpha=0.7)
+            plt.title(f'Integer Weight Distribution of {name}')
+            plt.xlabel('Weight Integer Value')
             plt.ylabel('Frequency')
             plt.grid(True)
-            plt.savefig(f'{filename_prefix}_{name}_weights.png')
+            plt.savefig(f'{filename_prefix}_{name}_weights_int.png')
             plt.close()
-            print(f'Weight distribution for {name} saved as {filename_prefix}_{name}_weights.png')
+            print(f'Integer weight distribution for {name} saved as {filename_prefix}_{name}_weights_int.png')
+            weight_scale = module.weight().q_scale()
+            weight_zero_point = module.weight().q_zero_point()
+            print(f"Scale for {name}: {weight_scale}")
+            print(f"Zero Point for {name}: {weight_zero_point}")
 
 def main():
     # 创建模型实例

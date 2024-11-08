@@ -5,3 +5,4 @@ iris_model.pth
 *.hex
 layer*
 output*
+*.png
