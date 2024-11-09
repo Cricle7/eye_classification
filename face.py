@@ -144,5 +144,5 @@ class IrisDataCollector:
             print(f"采集完成，共保存了 {self.left_eye_count} 张左眼虹膜图像和 {self.right_eye_count} 张右眼虹膜图像。")
 
 if __name__ == "__main__":
-    collector = IrisDataCollector(person_id='person_4')
+    collector = IrisDataCollector(person_id='person_3')
     collector.run()

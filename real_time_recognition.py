@@ -2,47 +2,11 @@ import cv2
 import mediapipe as mp
 import numpy as np
 import torch
+import models
 from torchvision import transforms
 from PIL import Image
-import torch.nn as nn
 import torch.nn.functional as F
-
-class IrisNet(nn.Module):
-    def __init__(self, num_classes=3):
-        super(IrisNet, self).__init__()
-        self.features = nn.Sequential(
-            nn.Conv2d(1, 16, kernel_size=3, padding=1),  # 输入通道数为1
-            nn.BatchNorm2d(16),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-
-            nn.Conv2d(16, 32, kernel_size=3, padding=1),
-            nn.BatchNorm2d(32),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-
-            nn.Conv2d(32, 64, kernel_size=3, padding=1),
-            nn.BatchNorm2d(64),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-
-            nn.Conv2d(64, 128, kernel_size=3, padding=1),
-            nn.BatchNorm2d(128),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-        )
-        self.classifier = nn.Sequential(
-            nn.Linear(128 * 14 * 14, 256),
-            nn.ReLU(),
-            nn.Dropout(0.5),
-            nn.Linear(256, num_classes)
-        )
-
-    def forward(self, x):
-        x = self.features(x)
-        x = x.view(x.size(0), -1)
-        x = self.classifier(x)
-        return x
+from tqdm import tqdm
 
 class IrisRecognizer:
     def __init__(self, model_path='iris_model.pth', label_mapping=None):
@@ -58,7 +22,7 @@ class IrisRecognizer:
 
         # 加载模型
         self.num_classes = len(label_mapping)
-        self.model = IrisNet(num_classes=self.num_classes).to(self.device)
+        self.model = models.IrisNet(num_classes=self.num_classes).to(self.device)
         self.model.load_state_dict(torch.load(model_path, map_location=self.device))
         self.model.eval()
 
@@ -118,7 +82,7 @@ class IrisRecognizer:
                 min(x_max + padding_x, image_shape[1]),
                 min(y_max + padding_y, image_shape[0]))
 
-    def process_frame(self, image):
+    def process_frame(self, image, threshold=0.5):
         """
         处理单帧图像，检测虹膜并进行识别。
         """
@@ -149,12 +113,8 @@ class IrisRecognizer:
                 right_input = self.preprocess_iris(right_iris_img)
 
                 # 进行预测
-                left_prediction = self.predict(left_input)
-                right_prediction = self.predict(right_input)
-
-                # 获取预测结果的人员名称
-                left_person = self.label_mapping[left_prediction]
-                right_person = self.label_mapping[right_prediction]
+                left_person = self.predict(left_input, threshold)
+                right_person = self.predict(right_input, threshold)
 
                 # 在图像上绘制边界框和人员名称
                 cv2.rectangle(image, (left_bbox[0], left_bbox[1]), (left_bbox[2], left_bbox[3]), (0, 255, 0), 2)
@@ -185,19 +145,24 @@ class IrisRecognizer:
 
         return iris_tensor
 
-    def predict(self, input_tensor):
+    def predict(self, input_tensor, threshold=0.5):
         """
-        使用模型进行预测。
+        使用模型进行预测，并基于置信度判断是否为“未知”类别。
         """
         if input_tensor is None:
-            return None
+            return 'unknown'
 
         with torch.no_grad():
             outputs = self.model(input_tensor)
-            _, predicted = torch.max(outputs.data, 1)
-            return predicted.item()
+            probabilities = F.softmax(outputs, dim=1)
+            max_prob, predicted = torch.max(probabilities, 1)
 
-    def run(self):
+            if max_prob.item() < threshold:
+                return 'unknown'
+            else:
+                return self.label_mapping.get(predicted.item(), 'unknown')
+
+    def run(self, threshold=0.5):
         """
         启动实时识别流程。
         """
@@ -208,7 +173,7 @@ class IrisRecognizer:
                     print("无法读取摄像头数据")
                     break
 
-                processed_frame, recognition_results = self.process_frame(frame)
+                processed_frame, recognition_results = self.process_frame(frame, threshold)
 
                 # 显示结果
                 cv2.imshow('Iris Recognition', processed_frame)
@@ -219,17 +184,3 @@ class IrisRecognizer:
         finally:
             self.cap.release()
             cv2.destroyAllWindows()
-
-if __name__ == "__main__":
-    # 定义标签映射（根据您的实际人员名称）
-    label_mapping = {
-        0: 'person1',
-        1: 'person2',
-        2: 'person3'
-    }
-
-    recognizer = IrisRecognizer(
-        model_path='iris_model.pth',
-        label_mapping=label_mapping
-    )
-    recognizer.run()
