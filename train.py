@@ -20,7 +20,7 @@ class IrisTrainer:
 
         # Image preprocessing
         self.transform = transforms.Compose([
-            transforms.Resize((224, 224)),
+            transforms.Resize((40, 40)),
             transforms.RandomHorizontalFlip(),
             transforms.RandomRotation(10),
             transforms.ColorJitter(brightness=0.2, contrast=0.2),

@@ -5,6 +5,12 @@ import torch.nn as nn
 import numpy as np
 import struct
 
+label_mapping = {
+    0: 'person1',
+    1: 'person2',
+    2: 'person3'
+}
+
 def save_model_parameters(model, filename_prefix='model_params'):
     """
     Extract the model's structure and parameters, saving them in .npy, .bin, and .hex formats.

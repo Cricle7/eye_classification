@@ -1,13 +1,19 @@
+# real_time_recognition.py
+
 import cv2
 import mediapipe as mp
 import numpy as np
 import torch
-import models
-from torchvision import transforms
-from PIL import Image
 import torch.nn.functional as F
+from PIL import Image
+from torchvision import transforms
+import models  # 确保 models.py 在同一目录下
 from tqdm import tqdm
+from serial_communicator import SerialCommunicator
+from preprocessor import Preprocessor
 
+
+# 定义 IrisRecognizer 类
 class IrisRecognizer:
     def __init__(self, model_path='final_iris_model.pth', label_mapping=None):
         """
@@ -29,12 +35,8 @@ class IrisRecognizer:
         # 标签映射
         self.label_mapping = label_mapping
 
-        # 图像预处理
-        self.transform = transforms.Compose([
-            transforms.Resize((40, 40)),
-            transforms.ToTensor(),
-            transforms.Normalize([0.485], [0.229])
-        ])
+        # 初始化预处理器
+        self.preprocessor = Preprocessor()
 
         # 初始化 MediaPipe Face Mesh
         self.mp_face_mesh = mp.solutions.face_mesh
@@ -54,6 +56,13 @@ class IrisRecognizer:
         self.cap = cv2.VideoCapture(0)
         if not self.cap.isOpened():
             raise IOError("无法打开摄像头")
+
+        # 初始化串口通信
+        self.serial_comm = SerialCommunicator(
+            serial_port='COM32',  # 根据您的实际串口设备
+            baud_rate=115200,
+            timeout=1
+        )
 
     def get_iris_region(self, landmarks, indices, image_shape):
         """
@@ -81,6 +90,29 @@ class IrisRecognizer:
                 max(y_min - padding_y, 0),
                 min(x_max + padding_x, image_shape[1]),
                 min(y_max + padding_y, image_shape[0]))
+
+    def preprocess_iris(self, iris_img):
+        """
+        对虹膜图像进行预处理。
+        """
+        iris_tensor = self.preprocessor.preprocess(iris_img)
+        if iris_tensor is not None:
+            iris_tensor = iris_tensor.to(self.device)
+        return iris_tensor
+
+    def predict(self, input_tensor):
+        """
+        使用模型进行预测，返回预测的标签和对应的置信度。
+        """
+        if input_tensor is None:
+            return 'unknown', 0.0
+
+        with torch.no_grad():
+            outputs = self.model(input_tensor)
+            probabilities = F.softmax(outputs, dim=1)
+            max_prob, predicted = torch.max(probabilities, 1)
+            predicted_label = self.label_mapping.get(predicted.item(), 'unknown')
+            return predicted_label, max_prob.item()
 
     def process_frame(self, image, threshold=0.5):
         """
@@ -112,55 +144,37 @@ class IrisRecognizer:
                 left_input = self.preprocess_iris(left_iris_img)
                 right_input = self.preprocess_iris(right_iris_img)
 
-                # 进行预测
-                left_person = self.predict(left_input, threshold)
-                right_person = self.predict(right_input, threshold)
+                # 对左右眼分别进行预测，获取标签和置信度
+                left_person, left_confidence = self.predict(left_input)
+                right_person, right_confidence = self.predict(right_input)
 
-                # 在图像上绘制边界框和人员名称
+                # 选取置信度较高的预测结果
+                if left_confidence >= right_confidence:
+                    final_person = left_person
+                    final_confidence = left_confidence
+                else:
+                    final_person = right_person
+                    final_confidence = right_confidence
+
+                # 判断置信度是否高于阈值
+                if final_confidence < threshold:
+                    final_person = 'unknown'
+
+                # 在左右眼的边界框上绘制相同的标签
                 cv2.rectangle(image, (left_bbox[0], left_bbox[1]), (left_bbox[2], left_bbox[3]), (0, 255, 0), 2)
-                cv2.putText(image, left_person, (left_bbox[0], left_bbox[1] - 10),
+                cv2.putText(image, f"{final_person} ({final_confidence:.2f})", (left_bbox[0], left_bbox[1] - 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
                 cv2.rectangle(image, (right_bbox[0], right_bbox[1]), (right_bbox[2], right_bbox[3]), (0, 255, 0), 2)
-                cv2.putText(image, right_person, (right_bbox[0], right_bbox[1] - 10),
+                cv2.putText(image, f"{final_person} ({final_confidence:.2f})", (right_bbox[0], right_bbox[1] - 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-                recognition_results.append((left_person, right_person))
+                recognition_results.append(final_person)
+
+                # 在每次识别后发送数据
+                self.serial_comm.send_data(final_person)
 
         return image, recognition_results
-
-    def preprocess_iris(self, iris_img):
-        """
-        对虹膜图像进行预处理。
-        """
-        if iris_img.size == 0:
-            return None
-
-        # 转换为 PIL 图像
-        iris_pil = Image.fromarray(cv2.cvtColor(iris_img, cv2.COLOR_BGR2RGB)).convert('L')
-
-        # 应用与训练时相同的预处理
-        iris_tensor = self.transform(iris_pil)
-        iris_tensor = iris_tensor.unsqueeze(0).to(self.device)  # 添加批次维度
-
-        return iris_tensor
-
-    def predict(self, input_tensor, threshold=0.5):
-        """
-        使用模型进行预测，并基于置信度判断是否为“未知”类别。
-        """
-        if input_tensor is None:
-            return 'unknown'
-
-        with torch.no_grad():
-            outputs = self.model(input_tensor)
-            probabilities = F.softmax(outputs, dim=1)
-            max_prob, predicted = torch.max(probabilities, 1)
-
-            if max_prob.item() < threshold:
-                return 'unknown'
-            else:
-                return self.label_mapping.get(predicted.item(), 'unknown')
 
     def run(self, threshold=0.5):
         """
@@ -184,6 +198,8 @@ class IrisRecognizer:
         finally:
             self.cap.release()
             cv2.destroyAllWindows()
+            # 关闭串口连接
+            self.serial_comm.close()
 
 if __name__ == "__main__":
     # 定义标签映射（根据您的实际人员名称）
@@ -194,8 +210,7 @@ if __name__ == "__main__":
     }
 
     recognizer = IrisRecognizer(
-        model_path='iris_model_epoch_200.pth',
+        model_path='iris_model_epoch_800.pth',
         label_mapping=label_mapping
     )
     recognizer.run()
-

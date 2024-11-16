@@ -41,8 +41,8 @@ def main():
     trainer = IrisTrainer(
         dataset_root='iris_dataset',
         num_classes=3,  # 保持为3类
-        batch_size=64,
-        num_epochs=5,
+        batch_size=512,
+        num_epochs=800,
         learning_rate=0.0005
     )
 
