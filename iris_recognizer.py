@@ -210,7 +210,7 @@ if __name__ == "__main__":
     }
 
     recognizer = IrisRecognizer(
-        model_path='iris_model_epoch_800.pth',
+        model_path='iris_model_fold5_best.pth',
         label_mapping=label_mapping
     )
     recognizer.run()

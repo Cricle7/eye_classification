@@ -1,69 +1,28 @@
-from train import IrisTrainer
-from quantize import quantize_model
-from utils import save_model_parameters
-from tqdm import tqdm
 import torch
+from torch import nn, optim
+from datasets import IrisDataset
+from models import IrisNet  # 假设你把模型文件命名为 model.py
+from train import IrisTrainer  # 假设你有一个训练类 IrisTrainer
+from torch.optim import Adam
 
-def evaluate_quantized_model(model, data_loader, threshold=0.5):
-    """
-    Evaluate the quantized model on the test set.
-    Inputs below the confidence threshold are classified as 'unknown'.
-    """
-    device = torch.device('cpu')  # Ensure evaluation is on CPU
-    model.to(device)
-    model.eval()
-    correct = 0
-    total = 0
-
-    with torch.no_grad():
-        progress_bar = tqdm(data_loader, desc='Evaluating Quantized Model')
-        for images, labels in progress_bar:
-            images = images.to(device)
-            labels = labels.to(device)
-
-            outputs = model(images)
-            probabilities = torch.softmax(outputs, dim=1)
-            max_probs, predicted = torch.max(probabilities, 1)
-
-            # 判定为已知类别或未知类别
-            predicted_classes = predicted.clone()
-            predicted_classes[max_probs < threshold] = 3  # 3为“未知”类别标签
-
-            # 计算准确率
-            correct += (predicted_classes == labels).sum().item()
-            total += labels.size(0)
-    test_acc = correct / total
-    print(f'Quantized Model Test Accuracy with Unknown Detection: {test_acc:.4f}')
-    return test_acc
 
 def main():
-    # Initialize the trainer
-    trainer = IrisTrainer(
-        dataset_root='iris_dataset',
-        num_classes=3,  # 保持为3类
-        batch_size=512,
-        num_epochs=800,
-        learning_rate=0.0005
-    )
+    # 初始化设备、模型、损失函数和优化器
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = IrisNet(num_classes=3).to(device)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = Adam(model.parameters(), lr=0.001)
 
-    # Train the model
-    trainer.train()
+    # 初始化数据集
+    dataset = IrisDataset('data/iris')
 
-    # Evaluate the trained model on the test set
-    trainer.evaluate()
+    # 初始化训练器
+    trainer = IrisTrainer(dataset, model, criterion, optimizer, device)
 
-    # Quantize the model
-    quantized_model = quantize_model(trainer.model, trainer.train_loader)
+    # 开始训练并执行 K 折交叉验证
+    avg_accuracy = trainer.train_kfold(k=5)
+    print(f"Average accuracy over 5 folds: {avg_accuracy:.4f}")
 
-    # Save quantized model
-    torch.save(quantized_model.state_dict(), 'quantized_iris_model.pth')
-    print('Quantized model saved to quantized_iris_model.pth')
-
-    # Evaluate quantized model with unknown detection
-    evaluate_quantized_model(quantized_model, trainer.test_loader, threshold=0.5)
-
-    # Save model parameters for FPGA deployment
-    save_model_parameters(quantized_model, filename_prefix='iris_model')
 
 if __name__ == "__main__":
     main()
